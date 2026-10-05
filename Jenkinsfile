@@ -7,7 +7,7 @@ pipeline {
         DOCKER_HUB_REPO = 'vermakshitij19/studybuddy'
         DOCKER_HUB_CREDENTIALS_ID = 'dockerhub-token'
         GITHUB_CREDENTIALS_ID = 'github-token'
-        KUBECONFIG_CREDENTIALS_ID = 'kubeconfig'
+        KUBECONFIG_CREDENTIALS_ID = 'config'
         ARGOCD_SERVER = '34.131.128.179:31704'
         ARGOCD_APP = 'study'
         TOOL_DIR = "${WORKSPACE}/.tools"
@@ -148,8 +148,8 @@ EOF
             }
             steps {
                 withCredentials([file(
-                    credentialsId: KUBECONFIG_CREDENTIALS_ID,
-                    variable: 'KUBECONFIG'
+                    credentialsId: config,
+                    variable: 'config'
                 )]) {
                     sh '''
                         set -eu
