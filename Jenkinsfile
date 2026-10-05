@@ -1,100 +1,172 @@
 pipeline {
-    agent any
+    agent {
+        label 'linux'
+    }
 
     environment {
-        DOCKER_HUB_REPO = "vermakshitij19/studybuddy"
-        DOCKER_HUB_CREDENTIALS_ID = "dockerhub-token"
+        DOCKER_HUB_REPO = 'vermakshitij19/studybuddy'
+        DOCKER_HUB_CREDENTIALS_ID = 'dockerhub-token'
+        GITHUB_CREDENTIALS_ID = 'github-token'
+        KUBECONFIG_CREDENTIALS_ID = 'kubeconfig'
+        ARGOCD_SERVER = '34.131.128.179:31704'
+        ARGOCD_APP = 'study'
+        TOOL_DIR = "${WORKSPACE}/.tools"
+        PATH+LOCAL_TOOLS = "${WORKSPACE}/.tools"
         IMAGE_TAG = "v${BUILD_NUMBER}"
     }
 
     stages {
-
-        stage('Checkout Github') {
+        stage('Checkout') {
             steps {
-                echo 'Checking out code from GitHub...'
-
                 checkout scmGit(
                     branches: [[name: '*/main']],
                     extensions: [],
                     userRemoteConfigs: [[
-                        credentialsId: 'github-token',
+                        credentialsId: "${GITHUB_CREDENTIALS_ID}",
                         url: 'https://github.com/vermakshitij19/STUDY-BUDDY-AI.git'
                     ]]
                 )
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Check for pipeline-generated commit') {
             steps {
                 script {
-                    echo 'Building Docker image...'
+                    def commitMessage = sh(
+                        script: 'git log -1 --pretty=%B',
+                        returnStdout: true
+                    ).trim()
+                    env.SKIP_PIPELINE = commitMessage.contains('[skip ci]') ? 'true' : 'false'
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            when {
+                expression { env.SKIP_PIPELINE != 'true' }
+            }
+            steps {
+                script {
                     dockerImage = docker.build("${DOCKER_HUB_REPO}:${IMAGE_TAG}")
                 }
             }
         }
 
         stage('Push Image to DockerHub') {
+            when {
+                expression { env.SKIP_PIPELINE != 'true' }
+            }
             steps {
                 script {
-                    echo 'Pushing Docker image to DockerHub...'
-
-                    docker.withRegistry(
-                        'https://registry.hub.docker.com',
-                        "${DOCKER_HUB_CREDENTIALS_ID}"
-                    ) {
-                        dockerImage.push("${IMAGE_TAG}")
+                    docker.withRegistry('https://registry-1.docker.io', DOCKER_HUB_CREDENTIALS_ID) {
+                        dockerImage.push()
                     }
                 }
             }
         }
-        // stage('Update Deployment YAML with New Tag') {
-        //     steps {
-        //         script {
-        //             sh """
-        //             sed -i 's|image: dataguru97/studybuddy:.*|image: dataguru97/studybuddy:${IMAGE_TAG}|' manifests/deployment.yaml
-        //             """
-        //         }
-        //     }
-        // }
 
-        // stage('Commit Updated YAML') {
-        //     steps {
-        //         script {
-        //             withCredentials([usernamePassword(credentialsId: 'github-token', usernameVariable: 'GIT_USER', passwordVariable: 'GIT_PASS')]) {
-        //                 sh '''
-        //                 git config user.name "data-guru0"
-        //                 git config user.email "gyrogodnon@gmail.com"
-        //                 git add manifests/deployment.yaml
-        //                 git commit -m "Update image tag to ${IMAGE_TAG}" || echo "No changes to commit"
-        //                 git push https://${GIT_USER}:${GIT_PASS}@github.com/data-guru0/STUDY-BUDDY-AI.git HEAD:main
-        //                 '''
-        //             }
-        //         }
-        //     }
-        // }
-        // stage('Install Kubectl & ArgoCD CLI Setup') {
-        //     steps {
-        //         sh '''
-        //         echo 'installing Kubectl & ArgoCD cli...'
-        //         curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-        //         chmod +x kubectl
-        //         mv kubectl /usr/local/bin/kubectl
-        //         curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-        //         chmod +x /usr/local/bin/argocd
-        //         '''
-        //     }
-        // }
-        // stage('Apply Kubernetes & Sync App with ArgoCD') {
-        //     steps {
-        //         script {
-        //             kubeconfig(credentialsId: 'kubeconfig', serverUrl: 'https://192.168.49.2:8443') {
-        //                 sh '''
-        //                 argocd login 34.45.193.5:31704 --username admin --password $(kubectl get secret -n argocd argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d) --insecure
-        //                 argocd app sync study
-        //                 '''
-        //             }
-        //         }
-        //     }
-        // }
+        stage('Update Deployment Image') {
+            when {
+                expression { env.SKIP_PIPELINE != 'true' }
+            }
+            steps {
+                sh '''
+                    set -eu
+                    sed -i -E \
+                        's|^([[:space:]]*image:[[:space:]]*vermakshitij19/studybuddy:).*|\1'"${IMAGE_TAG}"'|' \
+                        manifests/deployment.yaml
+                    grep -Fq "image: ${DOCKER_HUB_REPO}:${IMAGE_TAG}" manifests/deployment.yaml
+                '''
+            }
+        }
+
+        stage('Commit Deployment Image') {
+            when {
+                expression { env.SKIP_PIPELINE != 'true' }
+            }
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: GITHUB_CREDENTIALS_ID,
+                    usernameVariable: 'GIT_USER',
+                    passwordVariable: 'GIT_PASS'
+                )]) {
+                    sh '''
+                        set -eu
+                        git config user.name "vermakshitij19"
+                        git config user.email "vermakshitij19@gmail.com"
+                        git add manifests/deployment.yaml
+
+                        if ! git diff --cached --quiet; then
+                            git commit -m "Update image tag to ${IMAGE_TAG} [skip ci]"
+
+                            cat > "$WORKSPACE/.git-askpass" <<'EOF'
+#!/bin/sh
+case "$1" in
+    *Username*) printf '%s\n' "$GIT_USER" ;;
+    *Password*) printf '%s\n' "$GIT_PASS" ;;
+    *) exit 1 ;;
+esac
+EOF
+                            chmod 700 "$WORKSPACE/.git-askpass"
+                            trap 'rm -f "$WORKSPACE/.git-askpass"' EXIT
+                            GIT_ASKPASS="$WORKSPACE/.git-askpass" \
+                                GIT_TERMINAL_PROMPT=0 \
+                                git push origin HEAD:main
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('Install kubectl and Argo CD CLI') {
+            when {
+                expression { env.SKIP_PIPELINE != 'true' }
+            }
+            steps {
+                sh '''
+                    set -eu
+                    mkdir -p "$TOOL_DIR"
+
+                    KUBECTL_VERSION="$(curl --fail --location --silent --show-error \
+                        https://dl.k8s.io/release/stable.txt)"
+                    curl --fail --location --silent --show-error \
+                        "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+                        --output "$TOOL_DIR/kubectl"
+                    curl --fail --location --silent --show-error \
+                        https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64 \
+                        --output "$TOOL_DIR/argocd"
+
+                    chmod 700 "$TOOL_DIR/kubectl" "$TOOL_DIR/argocd"
+                    kubectl version --client
+                    argocd version --client
+                '''
+            }
+        }
+
+        stage('Sync Application with Argo CD') {
+            when {
+                expression { env.SKIP_PIPELINE != 'true' }
+            }
+            steps {
+                withCredentials([file(
+                    credentialsId: KUBECONFIG_CREDENTIALS_ID,
+                    variable: 'KUBECONFIG'
+                )]) {
+                    sh '''
+                        set -eu
+                        ARGOCD_PASSWORD="$(kubectl get secret -n argocd \
+                            argocd-initial-admin-secret \
+                            -o jsonpath='{.data.password}' | base64 --decode)"
+                        test -n "$ARGOCD_PASSWORD"
+
+                        argocd login "$ARGOCD_SERVER" \
+                            --username admin \
+                            --password "$ARGOCD_PASSWORD" \
+                            --insecure
+                        argocd app sync "$ARGOCD_APP"
+                    '''
+                }
+            }
+        }
     }
 }
