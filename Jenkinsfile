@@ -11,7 +11,6 @@ pipeline {
         ARGOCD_SERVER = '34.131.128.179:31704'
         ARGOCD_APP = 'study'
         TOOL_DIR = "${WORKSPACE}/.tools"
-        PATH+LOCAL_TOOLS = "${WORKSPACE}/.tools"
         IMAGE_TAG = "v${BUILD_NUMBER}"
     }
 
@@ -137,8 +136,8 @@ EOF
                         --output "$TOOL_DIR/argocd"
 
                     chmod 700 "$TOOL_DIR/kubectl" "$TOOL_DIR/argocd"
-                    kubectl version --client
-                    argocd version --client
+                    "$TOOL_DIR/kubectl" version --client
+                    "$TOOL_DIR/argocd" version --client
                 '''
             }
         }
@@ -154,16 +153,16 @@ EOF
                 )]) {
                     sh '''
                         set -eu
-                        ARGOCD_PASSWORD="$(kubectl get secret -n argocd \
+                        ARGOCD_PASSWORD="$("$TOOL_DIR/kubectl" get secret -n argocd \
                             argocd-initial-admin-secret \
                             -o jsonpath='{.data.password}' | base64 --decode)"
                         test -n "$ARGOCD_PASSWORD"
 
-                        argocd login "$ARGOCD_SERVER" \
+                        "$TOOL_DIR/argocd" login "$ARGOCD_SERVER" \
                             --username admin \
                             --password "$ARGOCD_PASSWORD" \
                             --insecure
-                        argocd app sync "$ARGOCD_APP"
+                        "$TOOL_DIR/argocd" app sync "$ARGOCD_APP"
                     '''
                 }
             }
