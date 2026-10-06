@@ -6,7 +6,7 @@ pipeline {
         DOCKER_HUB_CREDENTIALS_ID = 'dockerhub-token'
         GITHUB_CREDENTIALS_ID = 'github-token'
         config = 'config'
-        ARGOCD_SERVER = '34.131.128.179:31704'
+        ARGOCD_SERVER = '34.131.76.59:31704'
         ARGOCD_APP = 'study'
         TOOL_DIR = "${WORKSPACE}/.tools"
         IMAGE_TAG = "v${BUILD_NUMBER}"
@@ -70,7 +70,7 @@ pipeline {
                 sh '''
                     set -eu
                     sed -i -E \
-                        's|^([[:space:]]*image:[[:space:]]*vermakshitij19/studybuddy:).*|\1'"${IMAGE_TAG}"'|' \
+                        "s|^[[:space:]]*image:[[:space:]]*${DOCKER_HUB_REPO}:.*|        image: ${DOCKER_HUB_REPO}:${IMAGE_TAG}|" \
                         manifests/deployment.yaml
                     grep -Fq "image: ${DOCKER_HUB_REPO}:${IMAGE_TAG}" manifests/deployment.yaml
                 '''
